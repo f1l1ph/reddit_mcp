@@ -1,13 +1,14 @@
 from mcp.server.fastmcp import FastMCP
 from pathlib import Path
-from .client import get_mode, get_reddit, get_http_client, has_write_access
+from .client import get_mode, get_reddit, get_http_client, get_oauth_client, has_write_access
 from . import tools
 
 mcp = FastMCP("reddit-mcp")
 
 _mode = get_mode()
 _reddit = get_reddit() if _mode == "praw" else None
-_http = get_http_client() if _mode == "json_api" else None
+_oauth = get_oauth_client()  # None if no session.json or no token_v2
+_http = get_http_client() if (_mode == "json_api" and _oauth is None) else None
 _write = has_write_access()
 _session_exists = (Path(__file__).parent.parent.parent / "session.json").exists()
 
@@ -28,6 +29,8 @@ def scrape_subreddit(
     Set include_comments=True to fetch up to comment_limit comments per post."""
     if _mode == "praw":
         return tools.scrape_subreddit(_reddit, subreddit, query, limit, sort, time_filter, include_comments, comment_limit)
+    if _oauth is not None:
+        return tools.scrape_subreddit_oauth(_oauth, subreddit, query, limit, sort, time_filter)
     return tools.scrape_subreddit_json(_http, subreddit, query, limit, sort, time_filter, include_comments, comment_limit)
 
 
@@ -45,6 +48,8 @@ def search_reddit(
     time_filter: hour | day | week | month | year | all"""
     if _mode == "praw":
         return tools.search_reddit(_reddit, query, subreddits, limit, sort, time_filter)
+    if _oauth is not None:
+        return tools.search_reddit_oauth(_oauth, query, subreddits, limit, sort, time_filter)
     return tools.search_reddit_json(_http, query, subreddits, limit, sort, time_filter)
 
 

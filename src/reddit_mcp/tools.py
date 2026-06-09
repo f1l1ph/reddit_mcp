@@ -1,10 +1,143 @@
 import json
 import time
+from pathlib import Path
 import httpx
 import praw
 import praw.models
 
 _BASE = "https://www.reddit.com"
+_SESSION_FILE = Path(__file__).parent.parent.parent / "session.json"
+
+
+def _playwright_get_json(url: str) -> dict:
+    """Fetch a Reddit JSON endpoint using the saved Playwright session."""
+    from playwright.sync_api import sync_playwright
+    from playwright_stealth import Stealth
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        ctx = browser.new_context(storage_state=str(_SESSION_FILE))
+        Stealth().apply_stealth_sync(ctx)
+        page = ctx.new_page()
+        page.goto(url)
+        page.wait_for_load_state("domcontentloaded")
+        body = page.evaluate("() => document.body.innerText")
+        browser.close()
+    return json.loads(body)
+
+
+def _fetch_listing_playwright(url: str, params: dict, limit: int) -> list[dict]:
+    posts: list[dict] = []
+    after: str | None = None
+    while len(posts) < limit:
+        batch = min(100, limit - len(posts))
+        p = {**params, "limit": batch, "raw_json": 1}
+        if after:
+            p["after"] = after
+        query_str = "&".join(f"{k}={v}" for k, v in p.items())
+        data = _playwright_get_json(f"{url}?{query_str}")["data"]
+        children = data.get("children", [])
+        if not children:
+            break
+        posts.extend(c["data"] for c in children if c.get("kind") == "t3")
+        after = data.get("after")
+        if not after or len(children) < batch:
+            break
+        time.sleep(1)
+    return posts[:limit]
+
+
+def scrape_subreddit_oauth(
+    client: httpx.Client,
+    subreddit: str,
+    query: str | None,
+    limit: int,
+    sort: str,
+    time_filter: str,
+) -> str:
+    """Scrape using the OAuth API (oauth.reddit.com) with a session Bearer token."""
+    limit = min(limit, 1000)
+    if query:
+        url = f"/r/{subreddit}/search"
+        params: dict = {"q": query, "restrict_sr": 1, "sort": sort, "t": time_filter, "raw_json": 1}
+    else:
+        url = f"/r/{subreddit}/{sort}"
+        params = {"raw_json": 1}
+        if sort in ("top", "controversial"):
+            params["t"] = time_filter
+
+    posts: list[dict] = []
+    after: str | None = None
+    while len(posts) < limit:
+        batch = min(100, limit - len(posts))
+        p = {**params, "limit": batch}
+        if after:
+            p["after"] = after
+        r = client.get(url, params=p)
+        r.raise_for_status()
+        data = r.json()["data"]
+        children = data.get("children", [])
+        if not children:
+            break
+        posts.extend(c["data"] for c in children if c.get("kind") == "t3")
+        after = data.get("after")
+        if not after or len(children) < batch:
+            break
+        time.sleep(1)
+    return json.dumps([_post_from_json(p) for p in posts[:limit]])
+
+
+def search_reddit_oauth(
+    client: httpx.Client,
+    query: str,
+    subreddits: list[str] | None,
+    limit: int,
+    sort: str,
+    time_filter: str,
+) -> str:
+    if subreddits:
+        url = f"/r/{'+'.join(subreddits)}/search"
+        params: dict = {"q": query, "restrict_sr": 1, "sort": sort, "t": time_filter, "raw_json": 1}
+    else:
+        url = "/search"
+        params = {"q": query, "sort": sort, "t": time_filter, "raw_json": 1}
+
+    posts: list[dict] = []
+    after: str | None = None
+    while len(posts) < limit:
+        batch = min(100, limit - len(posts))
+        p = {**params, "limit": batch}
+        if after:
+            p["after"] = after
+        r = client.get(url, params=p)
+        r.raise_for_status()
+        data = r.json()["data"]
+        children = data.get("children", [])
+        if not children:
+            break
+        posts.extend(c["data"] for c in children if c.get("kind") == "t3")
+        after = data.get("after")
+        if not after or len(children) < batch:
+            break
+        time.sleep(1)
+    return json.dumps([_post_from_json(p) for p in posts[:limit]])
+
+
+def scrape_subreddit_playwright(
+    subreddit: str,
+    query: str | None,
+    limit: int,
+    sort: str,
+    time_filter: str,
+) -> str:
+    limit = min(limit, 200)
+    if query:
+        url = f"{_BASE}/r/{subreddit}/search.json"
+        params: dict = {"q": query, "restrict_sr": 1, "sort": sort, "t": time_filter}
+    else:
+        url = f"{_BASE}/r/{subreddit}/{sort}.json"
+        params = {"t": time_filter} if sort in ("top", "controversial") else {}
+    raw_posts = _fetch_listing_playwright(url, params, limit)
+    return json.dumps([_post_from_json(p) for p in raw_posts])
 
 
 # ---------------------------------------------------------------------------

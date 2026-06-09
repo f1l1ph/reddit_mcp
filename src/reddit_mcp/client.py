@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import httpx
@@ -6,6 +7,8 @@ from dotenv import load_dotenv
 
 # Load .env from the repo root regardless of where the binary is invoked from
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
+
+_SESSION_FILE = Path(__file__).parent.parent.parent / "session.json"
 
 
 def get_mode() -> str:
@@ -38,9 +41,39 @@ def get_reddit() -> praw.Reddit:
     )
 
 
+def get_session_token() -> str | None:
+    """Extract the token_v2 Bearer token from session.json, if it exists."""
+    if not _SESSION_FILE.exists():
+        return None
+    try:
+        data = json.loads(_SESSION_FILE.read_text())
+        for cookie in data.get("cookies", []):
+            if cookie.get("name") == "token_v2" and "reddit.com" in cookie.get("domain", ""):
+                return cookie["value"]
+    except Exception:
+        pass
+    return None
+
+
+def get_oauth_client() -> httpx.Client | None:
+    """Return an httpx client authenticated via the session token_v2 Bearer token.
+    Returns None if no valid session token is available."""
+    token = get_session_token()
+    if not token:
+        return None
+    return httpx.Client(
+        base_url="https://oauth.reddit.com",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "python:reddit-mcp:v0.1.0 (by /u/filipmakesthings)",
+            "Accept": "application/json",
+        },
+        follow_redirects=True,
+        timeout=30,
+    )
+
+
 def get_http_client() -> httpx.Client:
-    # Reddit blocks script-style User-Agents on .json endpoints.
-    # A real browser UA is required for unauthenticated JSON access.
     user_agent = (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
