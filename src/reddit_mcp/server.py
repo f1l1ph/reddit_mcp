@@ -1,4 +1,5 @@
 from mcp.server.fastmcp import FastMCP
+from pathlib import Path
 from .client import get_mode, get_reddit, get_http_client, has_write_access
 from . import tools
 
@@ -8,6 +9,7 @@ _mode = get_mode()
 _reddit = get_reddit() if _mode == "praw" else None
 _http = get_http_client() if _mode == "json_api" else None
 _write = has_write_access()
+_session_exists = (Path(__file__).parent.parent.parent / "session.json").exists()
 
 
 @mcp.tool()
@@ -92,6 +94,24 @@ if _write:
     def get_my_comments(limit: int = 25) -> str:
         """Get recent comments by the authenticated account."""
         return tools.get_my_comments(_reddit, limit)
+
+
+if _session_exists:
+    @mcp.tool()
+    async def pw_submit_comment(post_url: str, comment_text: str) -> str:
+        """Post a comment on a Reddit post using browser automation. post_url is the full URL."""
+        import json
+        import asyncio
+        from .playwright_client import submit_comment as _submit
+        return json.dumps(await asyncio.to_thread(_submit, post_url, comment_text))
+
+    @mcp.tool()
+    async def pw_check_session() -> str:
+        """Check whether the saved Reddit browser session is still valid."""
+        import json
+        import asyncio
+        from .playwright_client import check_session_valid
+        return json.dumps({"valid": await asyncio.to_thread(check_session_valid)})
 
 
 def main() -> None:

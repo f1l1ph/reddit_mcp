@@ -39,9 +39,19 @@ def get_reddit() -> praw.Reddit:
 
 
 def get_http_client() -> httpx.Client:
-    user_agent = os.environ.get("REDDIT_USER_AGENT", "python:reddit-mcp:v0.1.0")
+    # Reddit blocks script-style User-Agents on .json endpoints.
+    # A real browser UA is required for unauthenticated JSON access.
+    user_agent = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+    )
     return httpx.Client(
-        headers={"User-Agent": user_agent},
+        headers={
+            "User-Agent": user_agent,
+            "Accept": "application/json",
+        },
+        follow_redirects=True,
         timeout=30,
     )
 
