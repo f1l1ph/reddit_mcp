@@ -1,9 +1,10 @@
+import os
 from mcp.server.fastmcp import FastMCP
 from pathlib import Path
 from .client import get_mode, get_reddit, get_http_client, get_oauth_client, has_write_access
 from . import tools
 
-mcp = FastMCP("reddit-mcp")
+mcp = FastMCP("reddit-mcp", host=os.getenv("MCP_HOST", "127.0.0.1"), port=int(os.getenv("MCP_PORT", "8200")))
 
 _mode = get_mode()
 _reddit = get_reddit() if _mode == "praw" else None
@@ -120,4 +121,4 @@ if _session_exists:
 
 
 def main() -> None:
-    mcp.run()
+    mcp.run(transport=os.getenv("MCP_TRANSPORT", "stdio"))
